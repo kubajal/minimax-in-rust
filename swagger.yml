@@ -1,0 +1,84 @@
+swagger: "2.0"
+info:
+  description: "REST API for draughts"
+  version: "0.0.1"
+  title: "SwaggerDraughts"
+  contact:
+    email: "jj358817@icm.edu.pl"
+  license:
+    name: "GNU GPL v3"
+    url: "https://www.gnu.org/licenses/gpl-3.0.html"
+host: "localhost"
+basePath: "/v0"
+schemes:
+- "https"
+- "http"
+paths:
+  /board:
+    get:
+      summary: "Get board state"
+      description: ""
+      operationId: "getCurrentBoardState"
+      produces:
+      - "application/json"
+      responses:
+        "200":
+          description: "successful operation"
+          schema:
+            items:
+              $ref: "#/definitions/Board"
+    post:
+      summary: "Computer move"
+      description: ""
+      operationId: "computerMove"
+      consumes:
+      - "application/json"
+      produces:
+      - "application/json"
+      parameters:
+      - in: "body"
+        name: "board"
+        description: "State of the board"
+        required: true
+        schema:
+          $ref: "#/definitions/Board"
+      responses:
+        "200":
+          description: "successful operation"
+          schema:
+            items:
+              $ref: "#/definitions/Board"
+definitions:
+  Board:
+    required:
+    - "pieces"
+    type: "object"
+    properties:
+      pieces:
+        type: "array"
+        items:
+          type: "array"
+          items:
+            $ref: "#/definitions/Piece"
+  Piece:
+    type: "object"
+    required:
+    - "color"
+    - "type"
+    - "X"
+    - "Y"
+    properties:
+      color:
+        type: "string"
+        enum:
+        - "white"
+        - "black"
+      type:
+        type: "string"
+        enum:
+        - "man"
+        - "king"
+      X:
+        type: "integer"
+      Y:
+        type: "integer"

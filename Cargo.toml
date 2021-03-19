@@ -1,0 +1,9 @@
+[package]
+name = "minimax-for-8x8-draughts"
+version = "0.0.1"
+authors = ["Kuba Jalowiec <kuba.jalowiec@protonmail.com>"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]

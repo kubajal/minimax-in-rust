@@ -1,108 +1,123 @@
 #![allow(missing_docs, trivial_casts, unused_variables, unused_mut, unused_imports, unused_extern_crates, non_camel_case_types)]
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-extern crate serde_json;
 
-
-extern crate futures;
-extern crate chrono;
-#[macro_use]
-extern crate lazy_static;
-#[macro_use]
-extern crate log;
-
-// Logically this should be in the client and server modules, but rust doesn't allow `macro_use` from a module.
-#[cfg(any(feature = "client", feature = "server"))]
-#[macro_use]
-extern crate hyper;
-
-extern crate swagger;
-
+use async_trait::async_trait;
 use futures::Stream;
-use std::io::Error;
+use std::error::Error;
+use std::task::{Poll, Context};
+use swagger::{ApiError, ContextWrapper};
+use serde::{Serialize, Deserialize};
 
-#[allow(unused_imports)]
-use std::collections::HashMap;
-
-pub use futures::Future;
-
-#[cfg(any(feature = "client", feature = "server"))]
-mod mimetypes;
-
-pub use swagger::{ApiError, ContextWrapper};
+type ServiceError = Box<dyn Error + Send + Sync + 'static>;
 
 pub const BASE_PATH: &'static str = "/v0";
 pub const API_VERSION: &'static str = "0.0.1";
 
-
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum ComputerMoveResponse {
     /// successful operation
-    SuccessfulOperation ( object ) ,
+    SuccessfulOperation
+    (serde_json::Value)
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Serialize, Deserialize)]
 pub enum GetCurrentBoardStateResponse {
     /// successful operation
-    SuccessfulOperation ( object ) ,
+    SuccessfulOperation
+    (serde_json::Value)
 }
-
 
 /// API
-pub trait Api<C> {
+#[async_trait]
+pub trait Api<C: Send + Sync> {
+    fn poll_ready(&self, _cx: &mut Context) -> Poll<Result<(), Box<dyn Error + Send + Sync + 'static>>> {
+        Poll::Ready(Ok(()))
+    }
 
     /// Computer move
-    fn computer_move(&self, board: models::Board, context: &C) -> Box<Future<Item=ComputerMoveResponse, Error=ApiError>>;
+    async fn computer_move(
+        &self,
+        board: models::Board,
+        context: &C) -> Result<ComputerMoveResponse, ApiError>;
 
     /// Get board state
-    fn get_current_board_state(&self, context: &C) -> Box<Future<Item=GetCurrentBoardStateResponse, Error=ApiError>>;
+    async fn get_current_board_state(
+        &self,
+        context: &C) -> Result<GetCurrentBoardStateResponse, ApiError>;
 
 }
 
-/// API without a `Context`
-pub trait ApiNoContext {
+/// API where `Context` isn't passed on every API call
+#[async_trait]
+pub trait ApiNoContext<C: Send + Sync> {
+
+    fn poll_ready(&self, _cx: &mut Context) -> Poll<Result<(), Box<dyn Error + Send + Sync + 'static>>>;
+
+    fn context(&self) -> &C;
 
     /// Computer move
-    fn computer_move(&self, board: models::Board) -> Box<Future<Item=ComputerMoveResponse, Error=ApiError>>;
+    async fn computer_move(
+        &self,
+        board: models::Board,
+        ) -> Result<ComputerMoveResponse, ApiError>;
 
     /// Get board state
-    fn get_current_board_state(&self) -> Box<Future<Item=GetCurrentBoardStateResponse, Error=ApiError>>;
+    async fn get_current_board_state(
+        &self,
+        ) -> Result<GetCurrentBoardStateResponse, ApiError>;
 
 }
 
 /// Trait to extend an API to make it easy to bind it to a context.
-pub trait ContextWrapperExt<'a, C> where Self: Sized {
+pub trait ContextWrapperExt<C: Send + Sync> where Self: Sized
+{
     /// Binds this API to a context.
-    fn with_context(self: &'a Self, context: C) -> ContextWrapper<'a, Self, C>;
+    fn with_context(self: Self, context: C) -> ContextWrapper<Self, C>;
 }
 
-impl<'a, T: Api<C> + Sized, C> ContextWrapperExt<'a, C> for T {
-    fn with_context(self: &'a T, context: C) -> ContextWrapper<'a, T, C> {
+impl<T: Api<C> + Send + Sync, C: Clone + Send + Sync> ContextWrapperExt<C> for T {
+    fn with_context(self: T, context: C) -> ContextWrapper<T, C> {
          ContextWrapper::<T, C>::new(self, context)
     }
 }
 
-impl<'a, T: Api<C>, C> ApiNoContext for ContextWrapper<'a, T, C> {
+#[async_trait]
+impl<T: Api<C> + Send + Sync, C: Clone + Send + Sync> ApiNoContext<C> for ContextWrapper<T, C> {
+    fn poll_ready(&self, cx: &mut Context) -> Poll<Result<(), ServiceError>> {
+        self.api().poll_ready(cx)
+    }
+
+    fn context(&self) -> &C {
+        ContextWrapper::context(self)
+    }
 
     /// Computer move
-    fn computer_move(&self, board: models::Board) -> Box<Future<Item=ComputerMoveResponse, Error=ApiError>> {
-        self.api().computer_move(board, &self.context())
+    async fn computer_move(
+        &self,
+        board: models::Board,
+        ) -> Result<ComputerMoveResponse, ApiError>
+    {
+        let context = self.context().clone();
+        self.api().computer_move(board, &context).await
     }
 
     /// Get board state
-    fn get_current_board_state(&self) -> Box<Future<Item=GetCurrentBoardStateResponse, Error=ApiError>> {
-        self.api().get_current_board_state(&self.context())
+    async fn get_current_board_state(
+        &self,
+        ) -> Result<GetCurrentBoardStateResponse, ApiError>
+    {
+        let context = self.context().clone();
+        self.api().get_current_board_state(&context).await
     }
 
 }
+
 
 #[cfg(feature = "client")]
 pub mod client;
 
 // Re-export Client as a top-level name
 #[cfg(feature = "client")]
-pub use self::client::Client;
+pub use client::Client;
 
 #[cfg(feature = "server")]
 pub mod server;
@@ -111,4 +126,10 @@ pub mod server;
 #[cfg(feature = "server")]
 pub use self::server::Service;
 
+#[cfg(feature = "server")]
+pub mod context;
+
 pub mod models;
+
+#[cfg(any(feature = "client", feature = "server"))]
+pub(crate) mod header;

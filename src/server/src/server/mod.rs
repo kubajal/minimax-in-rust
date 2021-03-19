@@ -1,268 +1,280 @@
-#![allow(unused_extern_crates)]
-extern crate serde_ignored;
-extern crate tokio_core;
-extern crate native_tls;
-extern crate hyper_tls;
-extern crate openssl;
-extern crate mime;
-extern crate uuid;
-extern crate chrono;
-
-extern crate percent_encoding;
-extern crate url;
-
-
-use std::sync::Arc;
+use futures::{future, future::BoxFuture, Stream, stream, future::FutureExt, stream::TryStreamExt};
+use hyper::{Request, Response, StatusCode, Body, HeaderMap};
+use hyper::header::{HeaderName, HeaderValue, CONTENT_TYPE};
+use log::warn;
+#[allow(unused_imports)]
+use std::convert::{TryFrom, TryInto};
+use std::error::Error;
+use std::future::Future;
 use std::marker::PhantomData;
-use futures::{Future, future, Stream, stream};
-use hyper;
-use hyper::{Request, Response, Error, StatusCode};
-use hyper::header::{Headers, ContentType};
-use self::url::form_urlencoded;
-use mimetypes;
-
-
-use serde_json;
-
-
-#[allow(unused_imports)]
-use std::collections::{HashMap, BTreeMap};
-#[allow(unused_imports)]
-use swagger;
-use std::io;
-
-#[allow(unused_imports)]
-use std::collections::BTreeSet;
-
+use std::task::{Context, Poll};
+use swagger::{ApiError, BodyExt, Has, RequestParser, XSpanIdString};
 pub use swagger::auth::Authorization;
-use swagger::{ApiError, XSpanId, XSpanIdString, Has};
 use swagger::auth::Scopes;
+use url::form_urlencoded;
 
-use {Api,
+#[allow(unused_imports)]
+use crate::models;
+use crate::header;
+
+pub use crate::context;
+
+type ServiceFuture = BoxFuture<'static, Result<Response<Body>, crate::ServiceError>>;
+
+use crate::{Api,
      ComputerMoveResponse,
      GetCurrentBoardStateResponse
-     };
-#[allow(unused_imports)]
-use models;
-
-pub mod auth;
-
-header! { (Warning, "Warning") => [String] }
+};
 
 mod paths {
-    extern crate regex;
+    use lazy_static::lazy_static;
 
     lazy_static! {
-        pub static ref GLOBAL_REGEX_SET: regex::RegexSet = regex::RegexSet::new(&[
+        pub static ref GLOBAL_REGEX_SET: regex::RegexSet = regex::RegexSet::new(vec![
             r"^/v0/board$"
-        ]).unwrap();
+        ])
+        .expect("Unable to create global regex set");
     }
-    pub static ID_BOARD: usize = 0;
+    pub(crate) static ID_BOARD: usize = 0;
 }
 
-pub struct NewService<T, C> {
-    api_impl: Arc<T>,
+pub struct MakeService<T, C> where
+    T: Api<C> + Clone + Send + 'static,
+    C: Has<XSpanIdString>  + Send + Sync + 'static
+{
+    api_impl: T,
     marker: PhantomData<C>,
 }
 
-impl<T, C> NewService<T, C>
-where
-    T: Api<C> + Clone + 'static,
-    C: Has<XSpanIdString>  + 'static
+impl<T, C> MakeService<T, C> where
+    T: Api<C> + Clone + Send + 'static,
+    C: Has<XSpanIdString>  + Send + Sync + 'static
 {
-    pub fn new<U: Into<Arc<T>>>(api_impl: U) -> NewService<T, C> {
-        NewService{api_impl: api_impl.into(), marker: PhantomData}
+    pub fn new(api_impl: T) -> Self {
+        MakeService {
+            api_impl,
+            marker: PhantomData
+        }
     }
 }
 
-impl<T, C> hyper::server::NewService for NewService<T, C>
-where
-    T: Api<C> + Clone + 'static,
-    C: Has<XSpanIdString>  + 'static
+impl<T, C, Target> hyper::service::Service<Target> for MakeService<T, C> where
+    T: Api<C> + Clone + Send + 'static,
+    C: Has<XSpanIdString>  + Send + Sync + 'static
 {
-    type Request = (Request, C);
-    type Response = Response;
-    type Error = Error;
-    type Instance = Service<T, C>;
+    type Response = Service<T, C>;
+    type Error = crate::ServiceError;
+    type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
-    fn new_service(&self) -> Result<Self::Instance, io::Error> {
-        Ok(Service::new(self.api_impl.clone()))
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, target: Target) -> Self::Future {
+        futures::future::ok(Service::new(
+            self.api_impl.clone(),
+        ))
     }
 }
 
-pub struct Service<T, C> {
-    api_impl: Arc<T>,
+fn method_not_allowed() -> Result<Response<Body>, crate::ServiceError> {
+    Ok(
+        Response::builder().status(StatusCode::METHOD_NOT_ALLOWED)
+            .body(Body::empty())
+            .expect("Unable to create Method Not Allowed response")
+    )
+}
+
+pub struct Service<T, C> where
+    T: Api<C> + Clone + Send + 'static,
+    C: Has<XSpanIdString>  + Send + Sync + 'static
+{
+    api_impl: T,
     marker: PhantomData<C>,
 }
 
-impl<T, C> Service<T, C>
-where
-    T: Api<C> + Clone + 'static,
-    C: Has<XSpanIdString>  + 'static {
-    pub fn new<U: Into<Arc<T>>>(api_impl: U) -> Service<T, C> {
-        Service{api_impl: api_impl.into(), marker: PhantomData}
+impl<T, C> Service<T, C> where
+    T: Api<C> + Clone + Send + 'static,
+    C: Has<XSpanIdString>  + Send + Sync + 'static
+{
+    pub fn new(api_impl: T) -> Self {
+        Service {
+            api_impl: api_impl,
+            marker: PhantomData
+        }
     }
 }
 
-impl<T, C> hyper::server::Service for Service<T, C>
-where
-    T: Api<C> + Clone + 'static,
-    C: Has<XSpanIdString>  + 'static
+impl<T, C> Clone for Service<T, C> where
+    T: Api<C> + Clone + Send + 'static,
+    C: Has<XSpanIdString>  + Send + Sync + 'static
 {
-    type Request = (Request, C);
-    type Response = Response;
-    type Error = Error;
-    type Future = Box<Future<Item=Response, Error=Error>>;
+    fn clone(&self) -> Self {
+        Service {
+            api_impl: self.api_impl.clone(),
+            marker: self.marker.clone(),
+        }
+    }
+}
 
-    fn call(&self, (req, mut context): Self::Request) -> Self::Future {
-        let api_impl = self.api_impl.clone();
-        let (method, uri, _, headers, body) = req.deconstruct();
+impl<T, C> hyper::service::Service<(Request<Body>, C)> for Service<T, C> where
+    T: Api<C> + Clone + Send + Sync + 'static,
+    C: Has<XSpanIdString>  + Send + Sync + 'static
+{
+    type Response = Response<Body>;
+    type Error = crate::ServiceError;
+    type Future = ServiceFuture;
+
+    fn poll_ready(&mut self, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
+        self.api_impl.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: (Request<Body>, C)) -> Self::Future { async fn run<T, C>(mut api_impl: T, req: (Request<Body>, C)) -> Result<Response<Body>, crate::ServiceError> where
+        T: Api<C> + Clone + Send + 'static,
+        C: Has<XSpanIdString>  + Send + Sync + 'static
+    {
+        let (request, context) = req;
+        let (parts, body) = request.into_parts();
+        let (method, uri, headers) = (parts.method, parts.uri, parts.headers);
         let path = paths::GLOBAL_REGEX_SET.matches(uri.path());
+
         match &method {
 
             // ComputerMove - POST /board
-            &hyper::Method::Post if path.matched(paths::ID_BOARD) => {
-
-
-
-
-
-
+            &hyper::Method::POST if path.matched(paths::ID_BOARD) => {
                 // Body parameters (note that non-required body parameters will ignore garbage
                 // values, rather than causing a 400 response). Produce warning header and logs for
                 // any unused fields.
-                Box::new(body.concat2()
-                    .then(move |result| -> Box<Future<Item=Response, Error=Error>> {
-                        match result {
+                let result = body.to_raw().await;
+                match result {
                             Ok(body) => {
-
                                 let mut unused_elements = Vec::new();
                                 let param_board: Option<models::Board> = if !body.is_empty() {
-
                                     let deserializer = &mut serde_json::Deserializer::from_slice(&*body);
-
                                     match serde_ignored::deserialize(deserializer, |path| {
                                             warn!("Ignoring unknown field in body: {}", path);
                                             unused_elements.push(path.to_string());
                                     }) {
                                         Ok(param_board) => param_board,
-                                        Err(e) => return Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body(format!("Couldn't parse body parameter board - doesn't match schema: {}", e)))),
+                                        Err(e) => return Ok(Response::builder()
+                                                        .status(StatusCode::BAD_REQUEST)
+                                                        .body(Body::from(format!("Couldn't parse body parameter board - doesn't match schema: {}", e)))
+                                                        .expect("Unable to create Bad Request response for invalid body parameter board due to schema")),
                                     }
-
                                 } else {
                                     None
                                 };
                                 let param_board = match param_board {
                                     Some(param_board) => param_board,
-                                    None => return Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body("Missing required body parameter board"))),
+                                    None => return Ok(Response::builder()
+                                                        .status(StatusCode::BAD_REQUEST)
+                                                        .body(Body::from("Missing required body parameter board"))
+                                                        .expect("Unable to create Bad Request response for missing body parameter board")),
                                 };
 
-
-                                Box::new(api_impl.computer_move(param_board, &context)
-                                    .then(move |result| {
-                                        let mut response = Response::new();
-                                        response.headers_mut().set(XSpanId((&context as &Has<XSpanIdString>).get().0.to_string()));
+                                let result = api_impl.computer_move(
+                                            param_board,
+                                        &context
+                                    ).await;
+                                let mut response = Response::new(Body::empty());
+                                response.headers_mut().insert(
+                                            HeaderName::from_static("x-span-id"),
+                                            HeaderValue::from_str((&context as &dyn Has<XSpanIdString>).get().0.clone().to_string().as_str())
+                                                .expect("Unable to create X-Span-ID header value"));
 
                                         if !unused_elements.is_empty() {
-                                            response.headers_mut().set(Warning(format!("Ignoring unknown fields in body: {:?}", unused_elements)));
+                                            response.headers_mut().insert(
+                                                HeaderName::from_static("warning"),
+                                                HeaderValue::from_str(format!("Ignoring unknown fields in body: {:?}", unused_elements).as_str())
+                                                    .expect("Unable to create Warning header value"));
                                         }
 
                                         match result {
                                             Ok(rsp) => match rsp {
                                                 ComputerMoveResponse::SuccessfulOperation
-
                                                     (body)
-
-
                                                 => {
-                                                    response.set_status(StatusCode::try_from(200).unwrap());
-
-                                                    response.headers_mut().set(ContentType(mimetypes::responses::COMPUTER_MOVE_SUCCESSFUL_OPERATION.clone()));
-
-
+                                                    *response.status_mut() = StatusCode::from_u16(200).expect("Unable to turn 200 into a StatusCode");
+                                                    response.headers_mut().insert(
+                                                        CONTENT_TYPE,
+                                                        HeaderValue::from_str("application/json")
+                                                            .expect("Unable to create Content-Type header for COMPUTER_MOVE_SUCCESSFUL_OPERATION"));
                                                     let body = serde_json::to_string(&body).expect("impossible to fail to serialize");
-
-                                                    response.set_body(body);
+                                                    *response.body_mut() = Body::from(body);
                                                 },
                                             },
                                             Err(_) => {
                                                 // Application code returned an error. This should not happen, as the implementation should
                                                 // return a valid response.
-                                                response.set_status(StatusCode::InternalServerError);
-                                                response.set_body("An internal error occurred");
+                                                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                                                *response.body_mut() = Body::from("An internal error occurred");
                                             },
                                         }
 
-                                        future::ok(response)
-                                    }
-                                ))
-
-
+                                        Ok(response)
                             },
-                            Err(e) => Box::new(future::ok(Response::new().with_status(StatusCode::BadRequest).with_body(format!("Couldn't read body parameter board: {}", e)))),
+                            Err(e) => Ok(Response::builder()
+                                                .status(StatusCode::BAD_REQUEST)
+                                                .body(Body::from(format!("Couldn't read body parameter board: {}", e)))
+                                                .expect("Unable to create Bad Request response due to unable to read body parameter board")),
                         }
-                    })
-                ) as Box<Future<Item=Response, Error=Error>>
-
             },
 
-
             // GetCurrentBoardState - GET /board
-            &hyper::Method::Get if path.matched(paths::ID_BOARD) => {
-
-
-
-
-
-
-
-                Box::new({
-                        {{
-
-                                Box::new(api_impl.get_current_board_state(&context)
-                                    .then(move |result| {
-                                        let mut response = Response::new();
-                                        response.headers_mut().set(XSpanId((&context as &Has<XSpanIdString>).get().0.to_string()));
+            &hyper::Method::GET if path.matched(paths::ID_BOARD) => {
+                                let result = api_impl.get_current_board_state(
+                                        &context
+                                    ).await;
+                                let mut response = Response::new(Body::empty());
+                                response.headers_mut().insert(
+                                            HeaderName::from_static("x-span-id"),
+                                            HeaderValue::from_str((&context as &dyn Has<XSpanIdString>).get().0.clone().to_string().as_str())
+                                                .expect("Unable to create X-Span-ID header value"));
 
                                         match result {
                                             Ok(rsp) => match rsp {
                                                 GetCurrentBoardStateResponse::SuccessfulOperation
-
                                                     (body)
-
-
                                                 => {
-                                                    response.set_status(StatusCode::try_from(200).unwrap());
-
-                                                    response.headers_mut().set(ContentType(mimetypes::responses::GET_CURRENT_BOARD_STATE_SUCCESSFUL_OPERATION.clone()));
-
-
+                                                    *response.status_mut() = StatusCode::from_u16(200).expect("Unable to turn 200 into a StatusCode");
+                                                    response.headers_mut().insert(
+                                                        CONTENT_TYPE,
+                                                        HeaderValue::from_str("application/json")
+                                                            .expect("Unable to create Content-Type header for GET_CURRENT_BOARD_STATE_SUCCESSFUL_OPERATION"));
                                                     let body = serde_json::to_string(&body).expect("impossible to fail to serialize");
-
-                                                    response.set_body(body);
+                                                    *response.body_mut() = Body::from(body);
                                                 },
                                             },
                                             Err(_) => {
                                                 // Application code returned an error. This should not happen, as the implementation should
                                                 // return a valid response.
-                                                response.set_status(StatusCode::InternalServerError);
-                                                response.set_body("An internal error occurred");
+                                                *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                                                *response.body_mut() = Body::from("An internal error occurred");
                                             },
                                         }
 
-                                        future::ok(response)
-                                    }
-                                ))
-
-                        }}
-                }) as Box<Future<Item=Response, Error=Error>>
-
-
+                                        Ok(response)
             },
 
+            _ if path.matched(paths::ID_BOARD) => method_not_allowed(),
+            _ => Ok(Response::builder().status(StatusCode::NOT_FOUND)
+                    .body(Body::empty())
+                    .expect("Unable to create Not Found response"))
+        }
+    } Box::pin(run(self.api_impl.clone(), req)) }
+}
 
-            _ => Box::new(future::ok(Response::new().with_status(StatusCode::NotFound))) as Box<Future<Item=Response, Error=Error>>,
+/// Request parser for `Api`.
+pub struct ApiRequestParser;
+impl<T> RequestParser<T> for ApiRequestParser {
+    fn parse_operation_id(request: &Request<T>) -> Result<&'static str, ()> {
+        let path = paths::GLOBAL_REGEX_SET.matches(request.uri().path());
+        match request.method() {
+            // ComputerMove - POST /board
+            &hyper::Method::POST if path.matched(paths::ID_BOARD) => Ok("ComputerMove"),
+            // GetCurrentBoardState - GET /board
+            &hyper::Method::GET if path.matched(paths::ID_BOARD) => Ok("GetCurrentBoardState"),
+            _ => Err(()),
         }
     }
 }
-

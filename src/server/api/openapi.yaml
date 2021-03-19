@@ -1,0 +1,95 @@
+openapi: 3.0.1
+info:
+  contact:
+    email: jj358817@icm.edu.pl
+  description: REST API for draughts
+  license:
+    name: GNU GPL v3
+    url: https://www.gnu.org/licenses/gpl-3.0.html
+  title: SwaggerDraughts
+  version: 0.0.1
+servers:
+- url: https://localhost/v0
+- url: http://localhost/v0
+paths:
+  /board:
+    get:
+      operationId: getCurrentBoardState
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+          description: successful operation
+      summary: Get board state
+    post:
+      operationId: computerMove
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Board'
+        description: State of the board
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+          description: successful operation
+      summary: Computer move
+      x-codegen-request-body-name: board
+components:
+  schemas:
+    Board:
+      example:
+        pieces:
+        - - X: 0
+            Y: 6
+            type: white_man
+          - X: 0
+            Y: 6
+            type: white_man
+        - - X: 0
+            Y: 6
+            type: white_man
+          - X: 0
+            Y: 6
+            type: white_man
+      properties:
+        pieces:
+          items:
+            items:
+              $ref: '#/components/schemas/Field'
+            type: array
+          type: array
+      required:
+      - pieces
+      type: object
+    Field:
+      example:
+        X: 0
+        Y: 6
+        type: white_man
+      properties:
+        type:
+          enum:
+          - white_man
+          - white_king
+          - black_man
+          - black_king
+          - empty
+          type: string
+        X:
+          type: integer
+        Y:
+          type: integer
+      required:
+      - X
+      - "Y"
+      - type
+      type: object
+x-original-swagger-version: "2.0"
+

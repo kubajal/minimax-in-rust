@@ -9,9 +9,9 @@
  * https://github.com/swagger-api/swagger-codegen.git
  * Do not edit the class manually.
  */
-import { Piece } from './piece';
+import { Field } from './field';
 
 
 export interface Board { 
-    pieces: Array<Array<Piece>>;
+    pieces: Array<Array<Field>>;
 }

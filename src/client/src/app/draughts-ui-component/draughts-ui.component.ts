@@ -1,4 +1,5 @@
 import { Component, OnInit } from '@angular/core';
+import { DefaultService } from '../draughts-service-client/api/default.service'
 
 @Component({
   selector: 'app-draughts-ui',
@@ -7,7 +8,8 @@ import { Component, OnInit } from '@angular/core';
 })
 export class DraughtsUiComponent implements OnInit {
 
-  constructor() { }
+  constructor(private draughtsService: DefaultService) {
+  }
 
   ngOnInit(): void {
   }

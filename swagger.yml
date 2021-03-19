@@ -59,25 +59,22 @@ definitions:
         items:
           type: "array"
           items:
-            $ref: "#/definitions/Piece"
-  Piece:
+            $ref: "#/definitions/Field"
+  Field:
     type: "object"
     required:
-    - "color"
     - "type"
     - "X"
     - "Y"
     properties:
-      color:
-        type: "string"
-        enum:
-        - "white"
-        - "black"
       type:
         type: "string"
         enum:
-        - "man"
-        - "king"
+        - "white_man"
+        - "white_king"
+        - "black_man"
+        - "black_king"
+        - "empty"
       X:
         type: "integer"
       Y:

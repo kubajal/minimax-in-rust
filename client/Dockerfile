@@ -1,5 +1,7 @@
-FROM rust:1.50
+FROM node:latest
 
-COPY . /rust-app
+COPY . /angular-app
+RUN npm install -g @angular/cli 
+WORKDIR /angular-app
 
-ENTRYPOINT ["bash"]
+CMD ng serve

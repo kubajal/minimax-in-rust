@@ -1,0 +1,24 @@
+version: "3.9"
+services:
+  rust-app:
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./server/:/rust-app
+    image: "rust:1.50"
+    working_dir: /rust-app
+    networks:
+      - draughts-network
+    command: tail -F anything
+  angular-app:
+    ports:
+      - "4200:4200"
+    volumes:
+      - ./client/:/angular-app
+    working_dir: /angular-app
+    image: "node:latest"
+    networks:
+      - draughts-network
+    command: tail -F anything
+networks:
+  draughts-network:

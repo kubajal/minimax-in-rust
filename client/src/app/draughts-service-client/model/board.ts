@@ -12,6 +12,18 @@
 import { Field } from './field';
 
 
-export interface Board { 
+export class Board { 
     pieces: Array<Array<Field>>;
+    constructor(dimension: number) {
+      this.pieces = new Array<Array<Field>>();
+      let array = Array(dimension);
+      for(let x = 0; x < dimension; x++) {
+        let row = new Array<Field>();
+        for(let y = 0; y < dimension; y++) {
+          row.push(new Field(x, y));
+        }
+        this.pieces.push(row);
+      }
+    } 
+
 }

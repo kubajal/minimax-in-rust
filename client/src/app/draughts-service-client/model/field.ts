@@ -11,18 +11,51 @@
  */
 
 
-export interface Field { 
-    type: Field.TypeEnum;
-    X: number;
-    Y: number;
+export class Field {
+  constructor(x, y) {
+    this.type = Field.TypeEnum.Empty;
+    this.X = x;
+    this.Y = y;
+  }
+  type: Field.TypeEnum;
+  X: number;
+  Y: number;
+
+  getIcon() {
+    switch (this.type) {
+      case Field.TypeEnum.WhiteKing:
+        "./icons/white_king.png"
+      case Field.TypeEnum.WhiteMan:
+        "./icons/white_man.png"
+      case Field.TypeEnum.BlackKing:
+        "./icons/black_king.png"
+        case Field.TypeEnum.BlackMan:
+          "./icons/black_man.png"
+        case Field.TypeEnum.Empty:
+          "asdf"
+    }
+  }
+  public getFieldColor() {
+    switch ((this.X + this.Y) % 2) {
+      case 0:
+        return Field.ColorEnum.Black;
+      case 1:
+        return Field.ColorEnum.White;
+    }
+  }
 }
 export namespace Field {
-    export type TypeEnum = 'white_man' | 'white_king' | 'black_man' | 'black_king' | 'empty';
-    export const TypeEnum = {
-        WhiteMan: 'white_man' as TypeEnum,
-        WhiteKing: 'white_king' as TypeEnum,
-        BlackMan: 'black_man' as TypeEnum,
-        BlackKing: 'black_king' as TypeEnum,
-        Empty: 'empty' as TypeEnum
-    };
+  export type TypeEnum = 'white_man' | 'white_king' | 'black_man' | 'black_king' | 'empty';
+  export const TypeEnum = {
+    WhiteMan: 'white_man' as TypeEnum,
+    WhiteKing: 'white_king' as TypeEnum,
+    BlackMan: 'black_man' as TypeEnum,
+    BlackKing: 'black_king' as TypeEnum,
+    Empty: 'empty' as TypeEnum
+  };
+  export type ColorEnum = 'white' | 'black';
+  export const ColorEnum = {
+    White: 'white' as ColorEnum,
+    Black: 'black' as ColorEnum
+  };
 }

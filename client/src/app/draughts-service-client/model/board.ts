@@ -12,18 +12,25 @@
 import { Field } from './field';
 
 
-export class Board { 
-    pieces: Array<Array<Field>>;
-    constructor(dimension: number) {
-      this.pieces = new Array<Array<Field>>();
-      let array = Array(dimension);
-      for(let x = 0; x < dimension; x++) {
-        let row = new Array<Field>();
-        for(let y = 0; y < dimension; y++) {
-          row.push(new Field(x, y));
+export class Board {
+  readonly pieces: Array<Array<Field>>;
+  constructor(dimension: number) {
+    // this.pieces = new Array<Array<Field>>();
+    let array = Array(dimension)
+    let x = array.map(y => {
+      return array.map(x => {
+        if (y < 3 && x + y % 2 == 1) {
+          return new Field(x, y, Field.TypeEnum.WhiteMan)
         }
-        this.pieces.push(row);
-      }
-    } 
+        else if (y >= dimension - 3 && x + y % 2 == 1) {
+          return new Field(x, y, Field.TypeEnum.BlackMan)
+        }
+        else {
+          return new Field(x, y, Field.TypeEnum.Empty)
+        }
+      })
+    });
+    this.pieces = x;
+  }
 
 }

@@ -1,0 +1,28 @@
+.field {
+  min-height: 70px;
+  min-width: 70px;
+  background-repeat: no-repeat !important;
+  background-position: center !important;
+}
+img {
+  position: relative;
+  height: auto;
+}
+
+.white-field {
+  background-color: white;
+  color: white;
+}
+
+.black-field {
+  background-color: black;
+  color: black;
+}
+
+.black-man {
+  background: url('../../assets/icons/black_man.png');
+}
+
+.white-man {
+  background: url('../../assets/icons/white_man.png');
+}

@@ -3,9 +3,10 @@
 <table class="table">
   <tbody>
     <tr *ngFor="let row of board.pieces; let i = index">
-      <button *ngFor="let field of row; let j = index">
-        <img src=" {{ field.getIcon() }}">
-      </button>
+      <td>
+        <button [class]="field.getCssClass()" *ngFor="let field of row; let j = index">
+        </button>
+      </td>
     </tr>
   </tbody>  
 </table>

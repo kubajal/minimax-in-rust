@@ -13,6 +13,7 @@ export class DraughtsUiComponent implements OnInit {
   }
 
   board = new Board(8);
+  test = [1, 2, 3, 4];
 
   ngOnInit(): void {
 
